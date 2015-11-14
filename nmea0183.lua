@@ -129,10 +129,12 @@ do
   types['GSV'] = 'Satellites in view'
   types['GLL'] = 'Geographic Position - Latitude/Longitude'
   types['MTW'] = 'Mean Temperature of Water'
+  types['MWV'] = 'Wind Speed and Angle'
   types['RMB'] = 'Recommended Minimum Navigation Information'
   types['RMC'] = 'Recommended Minimum Navigation Information'
   types['VHW'] = 'Water speed and heading'
   types['VLW'] = 'Distance Traveled through Water'
+  types['ZDA'] = 'Time & Date - UTC, day, month, year and local time zone'
 
   function parseSentence(tree, buffer, offset, length)
     local last = offset + length
@@ -167,7 +169,7 @@ do
   -- The dissector
   function NMEAPROTO.dissector(buffer, pinfo, tree)
     pinfo.cols.protocol = "NMEA0183"
-    local msg_pattern = '%$[%w,%.]+*%x%x'
+    local msg_pattern = '%$[%w,%.%+%-]+*%x%x'
     local fields_pattern = ''
     local st
     local final = buffer:len()

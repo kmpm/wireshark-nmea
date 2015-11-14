@@ -10,4 +10,6 @@ nmea 0183 over ethernet protocol dissector for wireshark written in lua
 
 
 ## Reference
-* http://www.catb.org/gpsd/NMEA.html
+* NMEA format - http://www.catb.org/gpsd/NMEA.html
+* NMEA Simulator - http://users.adam.com.au/panaaj/
+* kplex - http://www.stripydog.com/kplex/
