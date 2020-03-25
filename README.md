@@ -11,5 +11,5 @@ nmea 0183 over ethernet protocol dissector for wireshark written in lua
 
 ## Reference
 * NMEA format - http://www.catb.org/gpsd/NMEA.html
-* NMEA Simulator - http://users.adam.com.au/panaaj/
+* NMEA Simulator - `link no longer working`
 * kplex - http://www.stripydog.com/kplex/
