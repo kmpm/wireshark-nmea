@@ -320,6 +320,7 @@ do
   types['VLW'] = 'Distance traveled through water'
   types['VPW'] = 'Speed, measured parallel to wind'
   types['VTG'] = 'Track made good and ground speed'
+  types['VWR'] = 'Apparent wind angle and speed'
   types['WCV'] = 'Waypoint closure velocity'
   types['WDC'] = 'Distance to waypoint, great circle'
   types['WDR'] = 'Distance to waypoint, rhumb line'
@@ -391,4 +392,5 @@ do
   -- Register the dissector
   udp_table = DissectorTable.get("udp.port")
   udp_table:add(5018, NMEAPROTO)
+  udp_table:add(2000, NMEAPROTO)
 end
