@@ -307,7 +307,7 @@ do
   types['ATR'] = 'Airtron'
   types['ATV'] = 'Activation, inc.'
   types['AVN'] = 'Advanced navigation, inc.'
-  types['AWA'] = 'Awa New Zealnd, ltd.'
+  types['AWA'] = 'Awa New Zealand, ltd.'
   types['AXN'] = 'Axiom navigation, inc.'
   types['BBG'] = 'BBG Incorporated'
   types['BBL'] = 'BBL Industries, inc.'
