@@ -9,7 +9,7 @@ else
 	FixPath = $1
 endif
 
-TESTFIELDS?=-e nmea.count -e nmea.format -e nmea.type -e nmea.header
+TESTFIELDS?=-e nmea.count -e nmea.msgs.format -e nmea.msgs.tag.header -e nmea.msgs.tag.talker
 
 SAMPLEFILES := $(wildcard samples/*.pcapng)
 SUBDIRS := tests
