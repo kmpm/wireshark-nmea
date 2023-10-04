@@ -13,78 +13,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
---#region Helper Functions
+-- each entry in wireguard usually relates to a package
+-- so do not show separated entries for AIS messages outside 
+-- of the normal NMEA messages
+local show_separate_ais = false
 
---
--- lookup a index in list, if missing return 'Unknown (index'
-local function lookup(arr, index)
-  local item = arr[index]
-  if item == nil then
-    return string.format('Unknown (%s)', index)
-  end
-  return item
-end
+local runonce = true -- Flag for remove\insert in table
 
---
--- Correct rounding
-local function round(x)
-  return x >= 0 and math.floor(x+0.5) or math.ceil(x-0.5)
-end
+-- used when show_separate_ais
+local ais_msgs = {}
 
---
--- bin2SignInt converts a binary value to a signed integer
-local function bin2SignInt(value)
-  local sign = value:sub(1, 1)
-  value = tonumber(value:sub(2), 2)
-  if sign == '1' then
-    value = value * -1
-  end
-  return value
-end
+-- symbols and other constants
+local DEGREE_SYMBOL = string.char(0xC2, 0xB0)
+local MINUTE_SYMBOL = string.char(0xE2, 0x80, 0xB2)
+local MAX_FIELDS = 25
 
 
--- verifyChecksum takes message and returns msgcrc, calccrc 
--- and stat: string['Valid'|'Invalid']
-local function verifyChecksum(message)
-  local msgcrc = message.text:sub(-2)				-- HEX ������
-  --msgcrc = tonumber(msgcrc, 16)				-- ������� � DEC �����
-  local calccrc = string.byte(message.text, 2)			-- DEC �����
-  for i = 3, #message.text - 3 do
-    local ascii = string.byte(message.text, i)		-- DEC �����
-    calccrc = bit32.bxor(calccrc, ascii)			-- DEC �����
-  end
-  msgcrc = string.format('0x%s', msgcrc)
-  local calcCrcHex = string.format('0x%02X', calccrc)			-- ������� � HEX ������
-  local crcstat = 'Unverified'
-  if calccrc == msgcrc then
-    crcstat = 'Valid'
-  else
-    crcstat = 'Invalid'
-  end
-  return msgcrc, calccrc, crcstat
-end
-
-
--- 
--- isNMEA checks payload for NMEA specifies
-local function isNMEA(buffer)
-  local nmea = false
-  local bufflen = #buffer():string()
-  if bufflen > 11 then
-    local firstbyte = buffer(0, 1):string()
-    local crcbyte = buffer(bufflen - 5, 1):string()
-    --local lastbytes = buffer(bufflen - 2, 2):string() --0x0D 0x0A
-    if ((firstbyte == '$') or (firstbyte == '!')) and (crcbyte == '*') then
-      nmea = true
-    end
-  end
-  return nmea
-end
-
---#endregion
-
-
---#region Constants & lookup values
+--#region Lookup values
 
 -- Talker ID
 local TALKERS = {}
@@ -802,12 +747,12 @@ NAV_STATUS_VALUES[14] = 'AIS-SART is active'
 NAV_STATUS_VALUES[15] = 'N/A' --'Not defined'
 
 
-local DEGREE = string.char(0xC2, 0xB0)
+
 -- Rate of Turn
 local ROT_VALUES = {}
 ROT_VALUES['0'] = 'Not turning'
-ROT_VALUES['-127'] = string.format('Turning left at more than 720 %s/min (No TI available)', DEGREE) --'Turning left at more than 5deg/30s (No TI available)'
-ROT_VALUES['127'] = string.format('Turning right at more than 720 %s/min (No TI available)', DEGREE) --'Turning right at more than 5deg/30s (No TI available)'
+ROT_VALUES['-127'] = string.format('Turning left at more than 720 %s/min (No TI available)', DEGREE_SYMBOL) --'Turning left at more than 5deg/30s (No TI available)'
+ROT_VALUES['127'] = string.format('Turning right at more than 720 %s/min (No TI available)', DEGREE_SYMBOL) --'Turning right at more than 5deg/30s (No TI available)'
 ROT_VALUES['128'] = 'N/A'
 
 -- Speed over Ground
@@ -852,27 +797,151 @@ SLOT_TIMEOUTS[1] = '1 frame is left until slot change'
 SLOT_TIMEOUTS[2] = '2 frames are left until slot change'
 SLOT_TIMEOUTS[3] = '3 or more frames are left until slot change'
 
+--#endregion
+
+
+
+--#region Helper Functions
+
+--isempty checks for nil or empty estring
+local function isempty(v)
+  return v == nil or v == ''
+end
+--
+-- lookup a index in list, if missing return 'Unknown (index'
+local function lookup(arr, index)
+  local item = arr[index]
+  if item == nil then
+    return string.format('Unknown (%s)', index)
+  end
+  return item
+end
+
+--
+-- Correct rounding
+local function round(x)
+  return x >= 0 and math.floor(x+0.5) or math.ceil(x-0.5)
+end
+
+--
+-- bin2SignInt converts a binary value to a signed integer
+local function bin2SignInt(value)
+  local sign = value:sub(1, 1)
+  value = tonumber(value:sub(2), 2)
+  if sign == '1' then
+    value = value * -1
+  end
+  return value
+end
+
+--
+-- verifyChecksum takes message dictionary and calculates crc for data in the .text property.
+-- Returns msgcrc, crchex and stat: string['Valid'|'Invalid']
+local function verifyChecksum(message)
+  -- extract all but crc
+  local msgcrc = message.text:sub(-2)				-- HEX ������
+  --msgcrc = tonumber(msgcrc, 16)				-- ������� � DEC �����
+  
+  local calccrc = string.byte(message.text, 2)			-- DEC �����
+  for i = 3, #message.text - 3 do
+    local ascii = string.byte(message.text, i)		-- DEC �����
+    calccrc = bit32.bxor(calccrc, ascii)			-- DEC �����
+  end
+  msgcrc = string.format('0x%s', msgcrc)
+  local crchex = string.format('0x%02X', calccrc)			-- ������� � HEX ������
+  local crcstat = 'Unverified'
+  if crchex == msgcrc then
+    crcstat = 'Valid'
+  else
+    crcstat = 'Invalid'
+  end
+  return msgcrc, crchex, crcstat
+end
+
+
+-- 
+-- isNMEA checks payload for NMEA specifies
+local function isNMEA(buffer)
+  local nmea = false
+  local bufflen = #buffer():string()
+  if bufflen > 11 then
+    local firstbyte = buffer(0, 1):string()
+    local crcbyte = buffer(bufflen - 5, 1):string()
+    --local lastbytes = buffer(bufflen - 2, 2):string() --0x0D 0x0A
+    if ((firstbyte == '$') or (firstbyte == '!')) and (crcbyte == '*') then
+      nmea = true
+    end
+  end
+  return nmea
+end
+
+
+-- parseMessages parses messages in packet and returns table
+local function parseMessages(buffer)
+  local buffstr = buffer():string() or ''
+  local pattern = '()([%!%$]%u%u%u%u[%w%+%-%.%,%:%;%<%=%>%?%@%`]+%*%x%x)()' -- ...%x%x()$'
+  local messages = {}
+  for itstart, item, itfinish in buffstr:gmatch(pattern) do
+    local msg = {
+      start = itstart - 1,
+      length = itfinish - itstart,
+      --length = #item,
+      text = item
+    }
+    table.insert(messages, msg)
+  end
+  return messages
+end
+
+
+-- Parsing fields in message
+-- Returns a list of fields and total length of fields
+local function parseFields(message)
+  local pattern = '[%!%$%,%*]()([%w%+%-%.%:%;%<%=%>%?%@%`%x]*)()'
+  local fields = {}
+  local total_length = 0
+  for itstart, item, itfinish in message.text:gmatch(pattern) do
+    local field = {
+      start = itstart - 1,
+      length = itfinish - itstart,
+      --length = #item,
+      value = item
+
+    }
+    if #fields > 0 then
+      total_length = total_length +1
+    end
+    total_length =  total_length + field.length
+    table.insert(fields, field)
+  end
+  return fields, total_length
+end
 
 
 --#endregion
-
 
 --#region Protocol
 
 NMEAPROTO = Proto('nmea', 'NMEA 0183 Protocol')
 NMEAPROTO.prefs.ports = Pref.string("Ports", "2000,3100", "Ports to dissect as NMEA 0183")
-
 local pf = NMEAPROTO.fields
+
 pf.count = ProtoField.uint8('nmea.count', 'Messages in packet')
-pf.format = ProtoField.string('nmea.format', 'Message Format')
+
+NMEAMSGPROTO = Proto('nmea.msgs', 'NMEA 0183 Message Sub')
+local msg_f = NMEAMSGPROTO.fields
+msg_f.format = ProtoField.string('nmea.msgs.format', 'Message Format')
 -- Tag
-pf.header = ProtoField.string('nmea.header', 'Header')
-pf.talker = ProtoField.string('nmea.talker', 'Talker')
-pf.msgtype = ProtoField.string('nmea.type', 'Message Type')
+msg_f.header = ProtoField.string('nmea.msgs.tag.header', 'Header')
+msg_f.talker = ProtoField.string('nmea.msgs.tag.talker', 'Talker')
+msg_f.msgtype = ProtoField.string('nmea.msgs.tag.type', 'Message Type')
 --
-pf.crcstat = ProtoField.string('nmea.checksum.status', 'Checksum Status')
+msg_f.crcstat = ProtoField.string('nmea.checksum.status', 'Checksum Status')
 -- Fields
-pf.fields = ProtoField.string('nmea.fields', 'Fields')
+for index=1,MAX_FIELDS do
+  pf['field' .. index] = ProtoField.string('nmea.field' .. index, 'Field ' .. index)
+end
+-- known fields
 pf.field_lat = ProtoField.string('nmea.fields.lat', 'Latitude')
 pf.field_lon = ProtoField.string('nmea.fields.lon', 'Longitude')
 pf.field_alt = ProtoField.string('nmea.fields.alt', 'Altitude')
@@ -897,10 +966,7 @@ pf.field_encaps_msg = ProtoField.string('nmea.fields.encaps_msg', 'Encapsulated 
 pf.field_num_fillbits = ProtoField.string('nmea.fields.num_fillbits', 'Number of Fill-Bits')
 pf.field_ais_msg_type = ProtoField.string('nmea.fields.ais_msg_type', 'AIS Message Type (ITU-R M.1371)')
 pf.field_mmsi_dst_ais = ProtoField.string('nmea.fields.mmsi_dst_ais', 'MMSI of The Destination AIS Unit')
---= ProtoField.string('nmea.field.', '')
---= ProtoField.string('nmea.field.', '')
---= ProtoField.string('nmea.field.', '')
---= ProtoField.string('nmea.field.', '')
+
 -- AIS Message Fields
 pf.ais_msg_type = ProtoField.string('nmea.ais.msg_type', 'Message Type')
 pf.ais_repeat = ProtoField.string('nmea.ais.repeat_ind', 'Repeat Indicator') --ProtoField..uint8
@@ -1003,61 +1069,28 @@ aisMsg123Fields[14] = {name = 'Spare', proto = pf.ais_spare, length = 3, value =
 aisMsg123Fields[15] = {name = 'Receiver Autonomous Integrity Monitoring Flag', proto = pf.ais_raim, length = 1, value = ''}
 aisMsg123Fields[16] = {name = 'Communication State', proto = pf.ais_comm, length = 19, value = ''}
 
-local arrsotdmafield = {}
-arrsotdmafield[1] = {name = 'Sync State', proto = pf.ais_comm_sync_state, length = 2, value = ''}
-arrsotdmafield[2] = {name = 'Slot Timeout', proto = pf.ais_comm_slot_timeout, length = 3, value = ''}
-arrsotdmafield[3] = {name = 'Sub Message', proto = nil, length = 12, value = ''}
+local sotdmafields = {}
+sotdmafields[1] = {name = 'Sync State', proto = pf.ais_comm_sync_state, length = 2, value = ''}
+sotdmafields[2] = {name = 'Slot Timeout', proto = pf.ais_comm_slot_timeout, length = 3, value = ''}
+sotdmafields[3] = {name = 'Sub Message', proto = nil, length = 12, value = ''}
 
-local arritdmafield = {}
-arritdmafield[1] = {name = 'Sync State', proto = pf.ais_comm_sync_state, length = 2, value = ''}
-arritdmafield[2] = {name = 'Slot Allocation', proto = pf.ais_comm_slot_alloc, length = 13, value = ''}
-arritdmafield[3] = {name = 'Number of Slots', proto = pf.ais_comm_total_slots, length = 2, value = ''}
-arritdmafield[4] = {name = 'Keep Flag', proto = pf.ais_comm_keep_flag, length = 1, value = ''}
+local itdmafields = {}
+itdmafields[1] = {name = 'Sync State', proto = pf.ais_comm_sync_state, length = 2, value = ''}
+itdmafields[2] = {name = 'Slot Allocation', proto = pf.ais_comm_slot_alloc, length = 13, value = ''}
+itdmafields[3] = {name = 'Number of Slots', proto = pf.ais_comm_total_slots, length = 2, value = ''}
+itdmafields[4] = {name = 'Keep Flag', proto = pf.ais_comm_keep_flag, length = 1, value = ''}
 
 
 -- Communication State \ Sub Message
-local arrsubmsg = {}
-arrsubmsg[0] = {name = 'Slot Offset', proto = pf.ais_comm_slot_offset}
-arrsubmsg[1] = {name = 'Hours and Minutes', proto = pf.ais_comm_hhmm}
-arrsubmsg[2] = {name = 'Slot Number', proto = pf.ais_comm_slot_num}
-arrsubmsg[3] = {name = 'Received Stations', proto = pf.ais_comm_rx_stations}
+local submsgs = {}
+submsgs[0] = {name = 'Slot Offset', proto = pf.ais_comm_slot_offset}
+submsgs[1] = {name = 'Hours and Minutes', proto = pf.ais_comm_hhmm}
+submsgs[2] = {name = 'Slot Number', proto = pf.ais_comm_slot_num}
+submsgs[3] = {name = 'Received Stations', proto = pf.ais_comm_rx_stations}
 
 
 
 
--- parseMessages parses messages in packet and returns table
-local function parseMessages(buffer)
-  local buffstr = buffer():string() or ''
-  local pattern = '()([%!%$]%u%u%u%u[%w%+%-%.%,%:%;%<%=%>%?%@%`]+%*%x%x)()' -- ...%x%x()$'
-  local messages = {}
-  for itstart, item, itfinish in buffstr:gmatch(pattern) do
-    local msg = {
-      start = itstart - 1,
-      length = itfinish - itstart,
-      --length = #item,
-      text = item
-    }
-    table.insert(messages, msg)
-  end
-  return messages
-end
-
-
--- Parsing fields in message
-local function parseFields(message)
-  local pattern = '[%!%$%,%*]()([%w%+%-%.%:%;%<%=%>%?%@%`%x]*)()'
-  local arrfield = {}
-  for itstart, item, itfinish in message.text:gmatch(pattern) do
-    local field = {
-      start = itstart - 1,
-      length = itfinish - itstart,
-      --length = #item,
-      value = item
-    }
-    table.insert(arrfield, field)
-  end
-  return arrfield
-end
 
 -- Convert payload of encapsulated message into 6-bit code string
 local function str2SixBitStr(payload)
@@ -1071,7 +1104,7 @@ local function str2SixBitStr(payload)
 end
 
 
-local runonce = true -- Flag for remove\insert in table
+
 
 -- Parsing fields in AIS Message (Type 1-3)
 local function parseAIS(message, aistree)
@@ -1079,22 +1112,18 @@ local function parseAIS(message, aistree)
   local start = 1
   local finish = 0
   local aismsgtype = tonumber(message:sub(1, aisMsg123Fields[1].length), 2)
+  
+  local fieldstable = aisMsg123Fields
   if runonce then
     if aismsgtype < 3 then
-      table.remove(aisMsg123Fields)
-      for _, field in ipairs(arrsotdmafield) do
-        table.insert(aisMsg123Fields, field)
-      end
+      fieldstable = sotdmafields
+
+    elseif aismsgtype == 3 then
+      fieldstable = itdmafields
     end
-    if aismsgtype == 3 then
-      table.remove(aisMsg123Fields)
-      for _, field in ipairs(arritdmafield) do
-        table.insert(aisMsg123Fields, field)
-      end
-    end
-    runonce = false
+   runonce = false
   end
-  for _, field in ipairs(aisMsg123Fields) do
+  for _, field in ipairs(fieldstable) do
     local fieldlen = field.length
     finish = finish + fieldlen
     field.value = message:sub(start, finish)
@@ -1122,6 +1151,10 @@ end
 
 -- Processing AIS Field Latitude/Longitude
 local function aisFieldLotLan(value, max, positive, negative)
+  if isempty(value) then
+    return "N/A"
+  end
+  
   local fieldvalue = bin2SignInt(value) / 600000
   if fieldvalue < max then
     local direct = positive
@@ -1179,15 +1212,16 @@ local function outputAISFields(buffer, tree)
     end
     if field.name == 'Course Over Ground' then
       fieldvalue = tonumber(field.value, 2)
-      if fieldvalue < 3600 then
+      if not isempty(fieldvalue) and fieldvalue < 3600 then
         fieldvalue = string.format('%s%s', fieldvalue / 10, degree)
       else
         fieldvalue = 'N/A'
       end
+      
     end
     if field.name == 'True Heading' then
       fieldvalue = tonumber(field.value, 2)
-      if fieldvalue < 511 then
+      if not isempty(fieldvalue) and fieldvalue < 511 then
         fieldvalue = string.format('%s%s', fieldvalue, degree)
       else
         fieldvalue = 'N/A'
@@ -1195,7 +1229,7 @@ local function outputAISFields(buffer, tree)
     end
     if field.name == 'Time Stamp' then
       fieldvalue = tonumber(field.value, 2)
-      if fieldvalue < 60 then
+      if not isempty(fieldvalue) and fieldvalue < 60 then
         fieldvalue = string.format('%ss', fieldvalue)
       else
         fieldvalue = lookup(TS_VALUES, fieldvalue)
@@ -1213,15 +1247,15 @@ local function outputAISFields(buffer, tree)
       fieldvalue = tonumber(field.value, 2)
       fieldvalue = lookup(SYNC_STATES, fieldvalue)
     end
-    if aismsgtype < 3 then
+    if not isempty(aismsgtype) and aismsgtype < 3 then
       if field.name == 'Slot Timeout' then
         fieldvalue = tonumber(field.value, 2)
         fieldvalue = lookup(SLOT_TIMEOUTS, fieldvalue)
       end
         if field.name == 'Sub Message' then
         local index = tonumber(aisMsg123Fields[#aisMsg123Fields - 1].value, 2)
-        field.name = arrsubmsg[index].name
-        field.proto = arrsubmsg[index].proto
+        field.name = submsgs[index].name
+        field.proto = submsgs[index].proto
       end
       if field.name == 'Hours and Minutes' then
         local hour = tonumber(field.value:sub(1, 5), 2)
@@ -1238,8 +1272,8 @@ local function outputAISFields(buffer, tree)
   end
 end
 
--- Output header to tree
-local function outputHeader(buffer, tree, start, header)
+-- outputTag writes the Tag header to the tree
+local function outputTag(buffer, tree, start, header)
   --local start = msgstart + 1
   local headerlen = #header
   local talkerlen = 2
@@ -1256,16 +1290,67 @@ local function outputHeader(buffer, tree, start, header)
   local msgtype = lookup(MSG_TYPES, typeshort)
   local tagtree = tree:add(buffer(start, headerlen), 'Tag: ')
   tagtree:append_text(string.format('%s - %s / %s', header, talker, msgtype))
-  tagtree:add(pf.header, buffer(start, headerlen), header)
-  tagtree:add(pf.talker, buffer(start, talkerlen), talker)
-  tagtree:add(pf.msgtype, buffer(start + talkerlen, headerlen - talkerlen), msgtype)
+  tagtree:add(msg_f.header, buffer(start, headerlen), header)
+  tagtree:add(msg_f.talker, buffer(start, talkerlen), talker)
+  tagtree:add(msg_f.msgtype, buffer(start + talkerlen, headerlen - talkerlen), msgtype)
   return talker, typeshort, msgtype
 end
 
-local arraismsg = {}
 
--- Output fields to tree
-local function outputFields(buffer, tree, msgstart, typeshort, fields)
+
+local function outputKnownField(buffer, tree, knownfield, fields, start, fl, fv)
+  if fv ~= '' then    
+    if knownfield.name == 'Latitude' then
+      fv = string.format('%s%s%s%s', fv:sub(1, 2), DEGREE_SYMBOL, fv:sub(3), MINUTE_SYMBOL)
+    end
+    if knownfield.name == 'Longitude' then
+      fv = string.format('%s%s%s%s', fv:sub(1, 3), DEGREE_SYMBOL, fv:sub(4), MINUTE_SYMBOL)
+    end
+    if knownfield.name == 'Position Fix' then
+      fv = lookup(POS_FIX_VALUES, fv)
+    end
+    if knownfield.name == 'Time' then
+      fv = string.format('%s:%s:%s', fv:sub(1, 2), fv:sub(3, 4), fv:sub(5))
+    end
+    if knownfield.name == 'Date' then
+      fv = string.format('%s-%s-%s', fv:sub(1, 2), fv:sub(3, 4), fv:sub(5))
+    end
+    if knownfield.name == 'Speed Over Ground' then
+      fv = string.format('%s knot(s)', fv)
+    end
+    if knownfield.name == 'Course Over Ground' then
+      fv = string.format('%s%s', fv, DEGREE_SYMBOL)
+    end
+    if knownfield.name == 'Magnetic Varuation' then
+      fv = string.format('%s%s', fv, DEGREE_SYMBOL)
+    end
+    if knownfield.name == 'Status' then
+      fv = lookup(STATUS_VALUES, fv)
+    end
+    if knownfield.name == 'AIS Channel' then
+      fv = lookup(AIS_CHANNELS, fv)
+    end
+    if knownfield.name == 'Encapsulated Radio Message' then
+      fv = fv:sub(1, #fv - fields[#fields - 1].value)
+      local aistree = tree:add(buffer(start, fl), 'AIS Message:', fv)
+      local sixbitstr = str2SixBitStr(fv)
+      if show_separate_ais then
+        if fields[3].value == fields[2].value then
+          table.insert(ais_msgs, sixbitstr)
+        else
+          ais_msgs[#ais_msgs].value = ais_msgs[#ais_msgs].value .. sixbitstr 
+        end
+      end
+      parseAIS(sixbitstr)
+      --aistree:add(buffer(start, fieldlen), '6-bit Code:', sixbitstr)
+      outputAISFields(buffer(start, fl), aistree)
+    end
+  end
+end
+
+
+-- Output fields to tree. If any AIS fields these get parsed as well
+local function outputFields(buffer, tree, msgstart, typeshort, fields, fields_length)
   -- Known type
   local isknowntype = false
   local known_fields = {}
@@ -1277,6 +1362,9 @@ local function outputFields(buffer, tree, msgstart, typeshort, fields)
       i = i + 1
     end
   end
+  -- tag and checksum are also fields, remove those from the count
+  local treename = string.format('Fields: (%s)', (#fields - 2))
+  local fieldtree = tree:add(buffer(msgstart, fields_length), treename)
   --
   if isknowntype then
     local index = 2
@@ -1285,51 +1373,7 @@ local function outputFields(buffer, tree, msgstart, typeshort, fields)
       local fieldlen = fields[index].length
       local fieldvalue = fields[index].value or ''
       if fieldvalue ~= '' then
-        local degree = string.char(0xC2, 0xB0)
-        local minute = string.char(0xE2, 0x80, 0xB2)
-        if knownfield.name == 'Latitude' then
-          fieldvalue = string.format('%s%s%s%s', fieldvalue:sub(1, 2), degree, fieldvalue:sub(3), minute)
-        end
-        if knownfield.name == 'Longitude' then
-          fieldvalue = string.format('%s%s%s%s', fieldvalue:sub(1, 3), degree, fieldvalue:sub(4), minute)
-        end
-        if knownfield.name == 'Position Fix' then
-          fieldvalue = lookup(POS_FIX_VALUES, fieldvalue)
-        end
-        if knownfield.name == 'Time' then
-          fieldvalue = string.format('%s:%s:%s', fieldvalue:sub(1, 2), fieldvalue:sub(3, 4), fieldvalue:sub(5))
-        end
-        if knownfield.name == 'Date' then
-          fieldvalue = string.format('%s-%s-%s', fieldvalue:sub(1, 2), fieldvalue:sub(3, 4), fieldvalue:sub(5))
-        end
-        if knownfield.name == 'Speed Over Ground' then
-          fieldvalue = string.format('%s knot(s)', fieldvalue)
-        end
-        if knownfield.name == 'Course Over Ground' then
-          fieldvalue = string.format('%s%s', fieldvalue, degree)
-        end
-        if knownfield.name == 'Magnetic Varuation' then
-          fieldvalue = string.format('%s%s', fieldvalue, degree)
-        end
-        if knownfield.name == 'Status' then
-          fieldvalue = lookup(STATUS_VALUES, fieldvalue)
-        end
-        if knownfield.name == 'AIS Channel' then
-          fieldvalue = lookup(AIS_CHANNELS, fieldvalue)
-        end
-        if knownfield.name == 'Encapsulated Radio Message' then
-          fieldvalue = fieldvalue:sub(1, #fieldvalue - fields[#fields - 1].value)
-          local aistree = tree:add(buffer(start, fieldlen), 'AIS Message:', fieldvalue)
-          local sixbitstr = str2SixBitStr(fieldvalue)
-    if fields[3].value == fields[2].value then
-      table.insert(arraismsg, sixbitstr)
-    else
-      arraismsg[#arraismsg].value = arraismsg[#arraismsg].value .. sixbitstr 
-    end
-          parseAIS(sixbitstr)
-          --aistree:add(buffer(start, fieldlen), '6-bit Code:', sixbitstr)
-          outputAISFields(buffer(start, fieldlen), aistree)
-        end
+        outputKnownField(buffer, fieldtree, knownfield, fields, start, fieldlen, fieldvalue)
       end
       if knownfield.length == 2 then
         if fields[index].length == 0 then
@@ -1340,7 +1384,7 @@ local function outputFields(buffer, tree, msgstart, typeshort, fields)
           index = index + 1
         end
       end
-      tree:add(knownfield.proto, buffer(start, fieldlen), fieldvalue)
+      fieldtree:add(knownfield.proto, buffer(start, fieldlen), fieldvalue)
       index = index + 1
     end
   else
@@ -1349,7 +1393,7 @@ local function outputFields(buffer, tree, msgstart, typeshort, fields)
         local fieldvalue = field.value
         if fieldvalue ~= '' then
           local start = msgstart + field.start
-          tree:add(pf.fields, buffer(start, field.length), fieldvalue) --#' .. index .. ': '
+          fieldtree:add(pf['field' .. index-1], buffer(start, field.length), fieldvalue) --#' .. index .. ': '
         end
       end
     end
@@ -1374,17 +1418,18 @@ function NMEAPROTO.dissector(buffer, pinfo, tree)
     if message.text:sub(1,1) == '!' then
       msgformat = 'Encapsulation'
     end
-    msgtree:add(pf.format, buffer(message.start, 1), msgformat)
-    local fields = parseFields(message)							-- Parsing fields in message
+    msgtree:add(msg_f.format, buffer(message.start, 1), msgformat)
+    local fields, fields_length = parseFields(message)							-- Parsing fields in message
     local header = fields[1].value
     local msgstart = message.start
-    local talker, typeshort, msgtype = outputHeader(buffer, msgtree, msgstart + 1, header)	-- Output header to tree
-    outputFields(buffer, msgtree, msgstart, typeshort, fields)				-- Output fields to tree
+    local talker, typeshort, msgtype = outputTag(buffer, msgtree, msgstart + 1, header)	
+    outputFields(buffer, msgtree, msgstart, typeshort, fields, fields_length)				-- Output fields to tree
+    
     -- Output checksum to tree
     local msgcrc, calccrc, crcstat = verifyChecksum(message)					-- Verify message checksum
     local crcstart = message.start + message.length - 2
     msgtree:add(buffer(crcstart, 2), 'Checksum:', msgcrc)
-    local crctree = msgtree:add(pf.crcstat, crcstat):set_generated(true)
+    local crctree = msgtree:add(msg_f.crcstat, crcstat):set_generated(true)
     crctree:add(buffer(crcstart, 2), 'Calculated Checksum:', calccrc):set_generated(true)
     --
     -- Output checksum expert info to tree
@@ -1395,12 +1440,14 @@ function NMEAPROTO.dissector(buffer, pinfo, tree)
       --msgtree:add_tvb_expert_info(expert, buffer())
     --end
     --
-for _, aismsg in ipairs(arraismsg) do
-local aistree = tree:add('AIS Message')
-parseAIS(aismsg, aistree)
-outputAISFields(buffer(), aistree)
-end
-arraismsg = {}
+    if show_separate_ais then
+      for _, aismsg in ipairs(ais_msgs) do
+        local aistree = tree:add('AIS Message')
+        parseAIS(aismsg, aistree)
+        outputAISFields(buffer(), aistree)
+      end
+    end
+    ais_msgs = {}
     -- Build pinfo.cols.info
     if index == 1 then
       colinfo = header
