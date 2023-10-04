@@ -9,8 +9,9 @@ else
 	FixPath = $1
 endif
 
-SAMPLEFILES := $(wildcard samples/*.pcapng)
+TESTFIELDS=-e nmea.count -e nmea.sentence.index -e nmea.sentence.tag
 
+SAMPLEFILES := $(wildcard samples/*.pcapng)
 SUBDIRS := tests
 TOPTARGETS := tests clean
 
@@ -26,7 +27,7 @@ samples: $(SAMPLEFILES)
 
 .PHONY: $(SAMPLEFILES)
 $(SAMPLEFILES):
-	"$(TSHARKBIN)" -X lua_script:nmea0183.lua -T fields -e nmea.count -e nmea.format -e nmea.header -e nmea.talker -e nmea.fields -e nmea.checksum.status -r $@
+	"$(TSHARKBIN)" -X lua_script:nmea0183.lua -T fields $(TESTFIELDS) -r $@
 
 
 .PHONY: ws

@@ -1,6 +1,5 @@
 # wireshark-nmea
-Wireshark protocol dissector for NMEA 0183 protocol over ethernet.
-Written in lua.
+Wireshark protocol dissector in lua for NMEA 0183 protocol over ethernet.
 
 
 
@@ -8,7 +7,7 @@ Written in lua.
 ## Testing
 * tshark -r samples/second.pcapng -T fields -X lua_script:nmea0183.lua -e nmea.message
 * wireshark -X lua_script:nmea0183.lua samples/second.pcapng
-
+* `make clean tests`
 
 ### PowerShell / Windows
 ```powershell
@@ -23,6 +22,11 @@ Written in lua.
 
 ## Reference
 * Wikipedia Article - https://en.wikipedia.org/wiki/NMEA_0183
-* NMEA format - http://www.catb.org/gpsd/NMEA.html
-* NMEA Simulator - `link no longer working`
+* NMEA format - https://gpsd.gitlab.io/gpsd/NMEA.html
 * kplex - http://www.stripydog.com/kplex/
+* Lua Support in Wireshark - https://www.wireshark.org/docs/wsdg_html_chunked/wsluarm.html
+* Wireshark wiki for lua - https://gitlab.com/wireshark/wireshark/-/wikis/Lua
+
+
+## License
+Apache License 2.0. See the file LICENSE.
